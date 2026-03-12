@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>竹居智享 - 企业级高保真渲染版</title>
+    <style>
+        :root { --emerald: #064e3b; --gold: #c5a059; }
+        body { margin: 0; background: #050505; color: white; font-family: "PingFang SC", sans-serif; overflow: hidden; }
+        
+        header { 
+            height: 90px; background: var(--emerald); display: flex; align-items: center; 
+            justify-content: space-between; padding: 0 30px; border-bottom: 2px solid var(--gold);
+            z-index: 1000; position: relative;
+        }
+
+        .api-panel { display: flex; align-items: center; gap: 15px; }
+        .api-input-wrap { display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,0.5); padding: 8px 15px; border-radius: 30px; border: 1px solid var(--gold); }
+        .api-input-wrap input { background: transparent; border: none; color: var(--gold); outline: none; width: 220px; font-size: 11px; }
+
+        .controls { display: flex; gap: 20px; align-items: center; }
+        
+        .param-group { display: flex; flex-direction: column; align-items: flex-start; }
+        .param-group label { font-size: 11px; color: var(--gold); margin-bottom: 4px; font-weight: bold; }
+        input[type=range] { width: 150px; accent-color: var(--gold); cursor: pointer; }
+
+        .circle-btn { 
+            width: 52px; height: 52px; border-radius: 50%; border: 1px solid rgba(197, 160, 89, 0.4);
+            background: rgba(255,255,255,0.05); color: white; cursor: pointer; font-size: 11px;
+            transition: 0.3s; display: flex; align-items: center; justify-content: center; text-align: center;
+        }
+        .circle-btn:hover { background: var(--gold); transform: translateY(-2px); }
+        .btn-main { background: var(--gold); border: none; font-weight: bold; width: 65px; height: 65px; font-size: 13px; box-shadow: 0 0 20px rgba(197, 160, 89, 0.4); }
+
+        #viewport { width: 100vw; height: calc(100vh - 90px); display: flex; justify-content: center; align-items: center; background: #111; }
+        #stage { position: relative; box-shadow: 0 0 80px #000; background: #000; display: none; }
+        #room-img { display: block; max-width: 100%; max-height: 70vh; }
+        
+        .furn { position: absolute; cursor: move; z-index: 100; border: 1px dashed transparent; }
+        .furn:hover { border-color: var(--gold); }
+        .furn img { width: 100%; display: block; pointer-events: none; }
+
+        #overlay { 
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: rgba(0,0,0,0.95); display: none; flex-direction: column; 
+            align-items: center; justify-content: center; z-index: 9999; 
+        }
+        .loading-spin { width: 50px; height: 50px; border: 3px solid #222; border-top-color: var(--gold); border-radius: 50%; animation: spin 1s linear infinite; }
+        
+        #result-screen { 
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: #000; display: none; flex-direction: column; 
+            align-items: center; justify-content: center; z-index: 10000; 
+        }
+        #final-img { max-width: 85%; max-height: 75vh; border: 1px solid #444; }
+        .save-row { margin-top: 30px; display: flex; gap: 20px; }
+        .btn-action { padding: 15px 40px; background: var(--gold); border: none; color: white; border-radius: 30px; font-size: 16px; cursor: pointer; font-weight: bold; }
+
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        input[type="file"] { display: none; }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="api-panel">
+        <div class="api-input-wrap">
+            <input type="password" id="api-key" placeholder="在此粘贴你的 Stability AI Key" onblur="checkBal()">
+            <span id="bal-info" style="font-size: 10px; color: var(--gold); white-space: nowrap;">余额: --</span>
+        </div>
+    </div>
+
+    <div class="controls">
+        <div class="param-group">
+            <!-- 这个滑块是关键：向左（低值）= 严格保持你的家具和布局；向右（高值）= AI 自由发挥 -->
+            <label>结构保真度 (0.1=完全不变): <span id="s-val">0.35</span></label>
+            <input type="range" id="strength" min="0.1" max="0.6" step="0.05" value="0.35" oninput="document.getElementById('s-val').innerText=this.value">
+        </div>
+
+        <button class="circle-btn" onclick="document.getElementById('f-r').click()">上传<br>底图</button>
+        <button class="circle-btn" onclick="document.getElementById('f-f').click()">添加<br>家具</button>
+        
+        <select id="style-type" class="circle-btn" style="width: 80px; background: none; border: 1px solid var(--gold); color: white;">
+            <option value="japandi">高定原木</option>
+            <option value="chinese">新中式</option>
+            <option value="euro">欧式简约</option>
+        </select>
+
+        <button class="circle-btn" style="border-color: #555;" onclick="loadHistory()">找回<br>上张</button>
+        <button class="circle-btn btn-main" onclick="startFidelityRender()">保真<br>渲染</button>
+    </div>
+</header>
+
+<div id="viewport">
+    <div id="stage">
+        <img id="room-img">
+        <div id="furn-layer"></div>
+    </div>
+</div>
+
+<div id="overlay">
+    <div class="loading-spin"></div>
+    <p style="color: var(--gold); margin-top: 25px; letter-spacing: 2px;">正在精准还原空间材质...</p>
+    <div id="err-msg" style="color: #ff4444; margin-top: 15px; display:none;"></div>
+    <button style="margin-top:20px; background:none; border:1px solid #fff; color:white; padding:5px 20px; cursor:pointer; display:none;" id="btn-close-err" onclick="this.parentElement.style.display='none'">返回</button>
+</div>
+
+<div id="result-screen">
+    <span style="position:absolute; top:40px; right:60px; font-size:40px; cursor:pointer;" onclick="this.parentElement.style.display='none'">×</span>
+    <img id="final-img">
+    <div class="save-row">
+        <button class="btn-action" onclick="downloadImg()">下载交付大图</button>
+        <button class="btn-action" style="background:#222;" onclick="this.parentElement.parentElement.style.display='none'">返回微调</button>
+    </div>
+</div>
+
+<input type="file" id="f-r" hidden onchange="handleRoom(event)">
+<input type="file" id="f-f" hidden onchange="handleFurn(event)">
+
+<script>
+    let furns = [];
+    let lastImg = null;
+    const base = document.getElementById('room-img');
+
+    async function checkBal() {
+        const key = document.getElementById('api-key').value;
+        if(!key) return;
+        try {
+            const res = await fetch('https://api.stability.ai/v1/user/balance', { headers: { 'Authorization': `Bearer ${key}` } });
+            const data = await res.json();
+            document.getElementById('bal-info').innerText = `余额: ${data.credits.toFixed(1)}`;
+        } catch(e) {}
+    }
+
+    function handleRoom(e) {
+        base.src = URL.createObjectURL(e.target.files[0]);
+        document.getElementById('stage').style.display = 'block';
+    }
+
+    function handleFurn(e) {
+        const div = document.createElement('div');
+        div.className = 'furn';
+        div.style.left = '100px'; div.style.top = '100px'; div.style.width = '200px';
+        const img = document.createElement('img');
+        img.src = URL.createObjectURL(e.target.files[0]);
+        div.appendChild(img);
+        
+        let s = 1.0;
+        div.onmousedown = (ev) => {
+            let ox = ev.clientX-div.offsetLeft, oy = ev.clientY-div.offsetTop;
+            document.onmousemove = (ev) => { div.style.left = ev.clientX-ox+'px'; div.style.top = ev.clientY-oy+'px'; };
+            document.onmouseup = () => document.onmousemove = null;
+        };
+        div.onwheel = (ev) => {
+            ev.preventDefault(); s += ev.deltaY>0?-0.1:0.1;
+            div.style.transform = `scale(${Math.max(0.1, s)})`;
+        };
+        document.getElementById('furn-layer').appendChild(div);
+        furns.push(div);
+    }
+
+    // --- 高保真生图逻辑 ---
+    async function startFidelityRender() {
+        const key = document.getElementById('api-key').value;
+        if(!key) return alert("请先输入 API Key");
+        
+        const overlay = document.getElementById('overlay');
+        const errDiv = document.getElementById('err-msg');
+        overlay.style.display = 'flex';
+        errDiv.style.display = 'none';
+
+        const blob = await capture();
+        const str = document.getElementById('strength').value;
+        const style = document.getElementById('style-type').value;
+
+        // 【保真渲染提示词】 重点：使用 enhance, materialize, lighting 而非 redesign
+        const promptLib = {
+            'japandi': "Photorealistic architectural interior photography, materialize the existing furniture with oak wood and linen textures, soft 10am sunlight, high-fidelity textures, stay exactly true to original layout and furniture positions, 8k resolution, professional lighting.",
+            'chinese': "High-end Modern Chinese interior, rosewood materialization, keep original furniture shapes and positions, zen atmosphere, professional interior photography, 8k, sharp details.",
+            'euro': "Modern luxury interior, marble and velvet materialization, maintain original space layout, elegant lighting, cinematic architectural render, 8k, photorealistic."
+        };
+
+        const formData = new FormData();
+        formData.append('init_image', blob);
+        formData.append('prompt', promptLib[style]);
+        // 低 strength = AI 只能改变材质和光影，不能改变形状和位置
+        formData.append('image_strength', str); 
+        formData.append('init_image_mode', "IMAGE_STRENGTH");
+        formData.append('output_format', "jpeg");
+
+        try {
+            const res = await fetch('https://api.stability.ai/v2beta/stable-image/generate/sd3', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${key}`, 'Accept': 'application/json' },
+                body: formData
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                lastImg = "data:image/jpeg;base64," + data.image;
+                document.getElementById('final-img').src = lastImg;
+                document.getElementById('result-screen').style.display = 'flex';
+                overlay.style.display = 'none';
+                checkBal();
+            } else {
+                throw new Error(data.errors ? data.errors.join(", ") : "渲染失败");
+            }
+        } catch (err) {
+            errDiv.innerText = err.message;
+            errDiv.style.display = 'block';
+            document.getElementById('btn-close-err').style.display = 'block';
+        }
+    }
+
+    function loadHistory() {
+        if(!lastImg) return alert("记录空空如也");
+        document.getElementById('final-img').src = lastImg;
+        document.getElementById('result-screen').style.display = 'flex';
+    }
+
+    function capture() {
+        return new Promise(resolve => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = base.naturalWidth; canvas.height = base.naturalHeight;
+            ctx.drawImage(base, 0, 0);
+            const ratio = canvas.width / base.clientWidth;
+            furns.forEach(f => {
+                const r = f.getBoundingClientRect();
+                const p = document.getElementById('stage').getBoundingClientRect();
+                // 确保合成图清晰，帮助 AI 识别边界
+                ctx.drawImage(f.querySelector('img'), (r.left-p.left)*ratio, (r.top-p.top)*ratio, r.width*ratio, r.height*ratio);
+            });
+            canvas.toBlob(b => resolve(b), 'image/jpeg', 0.95);
+        });
+    }
+
+    function downloadImg() {
+        const link = document.createElement('a');
+        link.href = document.getElementById('final-img').src;
+        link.download = '竹居智享_高保真渲染图.jpg';
+        link.click();
+    }
+</script>
+</body>
+</html>
