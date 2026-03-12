@@ -1,0 +1,5 @@
+{
+  "name": "Lumina Edit - AI Image Editor",
+  "description": "An advanced AI-powered image editing tool using Gemini 2.5 Flash Image for natural language image manipulation.",
+  "requestFramePermissions": []
+}
